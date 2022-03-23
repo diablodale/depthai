@@ -2,6 +2,7 @@
 import argparse
 import json
 import shutil
+import time
 import traceback
 from argparse import ArgumentParser
 from pathlib import Path
@@ -38,13 +39,13 @@ def parse_args():
 
     Image capture requires the use of a printed OpenCV charuco calibration target applied to a flat surface(ex: sturdy cardboard).
     Default board size used in this script is 22x16. However you can send a customized one too.
-    When taking photos, ensure enough amount of markers are visible and images are crisp. 
+    When taking photos, ensure enough amount of markers are visible and images are crisp.
     The board does not need to fit within each drawn red polygon shape, but it should mimic the display of the polygon.
 
     If the calibration checkerboard corners cannot be found, the user will be prompted to try that calibration pose again.
 
     The script requires a RMS error < 1.0 to generate a calibration file. If RMS exceeds this threshold, an error is displayed.
-    An average epipolar error of <1.5 is considered to be good, but not required. 
+    An average epipolar error of <1.5 is considered to be good, but not required.
 
     Example usage:
 
@@ -53,7 +54,7 @@ def parse_args():
 
     Only run image processing only with same board setup. Requires a set of saved capture images:
     python3 calibrate.py -s 3.0 -ms 2.5 -brd DM2CAM -m process
-    
+
     Delete all existing images before starting image capture:
     python3 calibrate.py -i delete
     '''
@@ -94,7 +95,7 @@ def parse_args():
                         required=False, help="Set the manual lens position of the camera for calibration")
     parser.add_argument("-fps", "--fps", default=30, type=int,
                         required=False, help="Set capture FPS for all cameras. Default: %(default)s")
-    
+
     options = parser.parse_args()
 
     # Set some extra defaults, `-brd` would override them
@@ -105,7 +106,7 @@ def parse_args():
             raise argparse.ArgumentError(options.markerSizeCm, "-ms / --markerSizeCm needs to be provided (you can use -db / --defaultBoard if using calibration board from this repository or calib.io to calculate -ms automatically)")
     if options.squareSizeCm < 2.2:
         raise argparse.ArgumentTypeError("-s / --squareSizeCm needs to be greater than 2.2 cm")
-        
+
     return options
 
 
@@ -149,7 +150,7 @@ class Main:
         for properties in cameraProperties:
             if properties.sensorName == 'OV7251':
                 raise Exception(
-            "OAK-D-Lite Calibration is not supported on main yet. Please use `lite_calibration` branch to calibrate your OAK-D-Lite!!") 
+            "OAK-D-Lite Calibration is not supported on main yet. Please use `lite_calibration` branch to calibrate your OAK-D-Lite!!")
 
         self.device.startPipeline(pipeline)"""
         self.left_camera_queue = self.device.getOutputQueue("left", 30, True)
@@ -194,7 +195,7 @@ class Main:
         else:
             cam_left.setBoardSocket(dai.CameraBoardSocket.LEFT)
             cam_right.setBoardSocket(dai.CameraBoardSocket.RIGHT)
-                
+
         cam_left.setResolution(
             dai.MonoCameraProperties.SensorResolution.THE_800_P)
         cam_left.setFps(self.args.fps)
@@ -221,7 +222,7 @@ class Main:
 
             xout_rgb_isp = pipeline.createXLinkOut()
             xout_rgb_isp.setStreamName("rgb")
-            rgb_cam.isp.link(xout_rgb_isp.input)        
+            rgb_cam.isp.link(xout_rgb_isp.input)
 
         return pipeline
 
@@ -318,6 +319,7 @@ class Main:
         recent_left = None
         recent_right = None
         recent_color = None
+        end_time = time.time() + 10.0
         # with self.get_pipeline() as pipeline:
         while not finished:
             current_left  = self.left_camera_queue.tryGet()
@@ -351,6 +353,11 @@ class Main:
                 if debug:
                     print("setting capture true------------------------")
                 capturing = True
+            elif time.time() > end_time:
+                if debug:
+                    print("setting capture true------------------------")
+                capturing = True
+                print('\a')
 
             frame_list = []
             # left_frame = recent_left.getCvFrame()
@@ -444,8 +451,9 @@ class Main:
                     captured_left = False
                     captured_right = False
                     captured_color = False
+                    end_time = time.time() + 10.0
                 elif tried_left and tried_right and tried_color:
-                     #TODO(Sachin): add condition for RGB too and when break happens and if RGB 
+                     #TODO(Sachin): add condition for RGB too and when break happens and if RGB
                     # is not received it will throw an error. add an exception to it
                     self.show_failed_capture_frame()
                     capturing = False
@@ -465,7 +473,7 @@ class Main:
                         finished = True
                         cv2.destroyAllWindows()
                         break
-            
+
             combine_img = None
             if not self.args.disableRgb:
                 frame_list[2] = np.pad(frame_list[2], ((40, 0), (0,0)), 'constant', constant_values=0)
@@ -543,7 +551,7 @@ class Main:
                     self.board_config['board_config']['left_to_right_distance_cm'] - self.board_config['board_config']['left_to_rgb_distance_cm'], 0.0, 0.0]
                 calibration_handler.setCameraExtrinsics(
                     right, dai.CameraBoardSocket.RGB, calibData[7], calibData[8], measuredTranslation)
-            
+
             resImage = None
             if not self.device.isClosed():
                 dev_info = self.device.getDeviceInfo()
@@ -551,7 +559,7 @@ class Main:
                 calib_dest_path = dest_path + '/' + mx_serial_id + '.json'
                 calibration_handler.eepromToJsonFile(calib_dest_path)
                 is_write_succesful = False
-                
+
                 try:
                     is_write_succesful = self.device.flashCalibration(
                         calibration_handler)
